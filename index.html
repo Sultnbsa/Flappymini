@@ -1,162 +1,242 @@
-<!DOCTYPE html>
+ <!doctype html>
 <html lang="id">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Flappy Bird - Easy Mode</title>
-<style>
-  body {
-    margin: 0;
-    overflow: hidden;
-    background-color: #70c5ce;
-    touch-action: manipulation;
-  }
-  canvas {
-    display: block;
-    margin: 0 auto;
-    background: linear-gradient(to bottom, #70c5ce, #d0f4f7);
-  }
-  #score {
-    position: absolute;
-    top: 15px;
-    left: 50%;
-    transform: translateX(-50%);
-    color: white;
-    font-size: 24px;
-    font-family: sans-serif;
-    font-weight: bold;
-    text-shadow: 2px 2px 4px #000;
-  }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mini Flappy (Versi Mudah + High Score)</title>
+  <style>
+    :root{ --bg:#70c5ce; --pipe:#2e8b57; --bird:#ffcc00; --ground:#de9b48; }
+    html,body{ height:100%; margin:0; display:flex; align-items:center; justify-content:center; background:var(--bg); font-family:system-ui,Segoe UI,Roboto,Arial;}
+    canvas{ background: linear-gradient(#70c5ce,#8fd3d9); border-radius:12px; box-shadow:0 8px 24px rgba(0,0,0,.25); }
+    #ui{ position:fixed; top:18px; left:50%; transform:translateX(-50%); color:#fff; text-shadow:0 1px 3px rgba(0,0,0,.4); text-align:center;}
+    #instructions{ font-size:14px; opacity:.95;}
+    #score{ font-size:24px; font-weight:700; margin-top:4px;}
+    #highscore{ font-size:18px; opacity:0.9;}
+  </style>
 </head>
 <body>
-<canvas id="gameCanvas" width="400" height="600"></canvas>
-<div id="score">Skor: 0 | Tertinggi: 0</div>
+  <div id="ui">
+    <div id="instructions">Klik / Ketuk / Tekan <strong>Spasi</strong> untuk terbang</div>
+    <div id="score">Skor: 0</div>
+    <div id="highscore">Skor Tertinggi: 0</div>
+  </div>
+  <canvas id="game" width="480" height="640"></canvas>
 
 <script>
-const canvas = document.getElementById("gameCanvas");
-const ctx = canvas.getContext("2d");
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const highScoreEl = document.getElementById('highscore');
 
-let bird = {
-  x: 80,
-  y: 150,
-  radius: 12,
-  gravity: 0.2,    // lebih ringan agar lambat
-  lift: -4.8,      // kekuatan loncat
-  velocity: 0,
-};
+let W = canvas.width;
+let H = canvas.height;
+const DPR = window.devicePixelRatio || 1;
+canvas.width = W * DPR;
+canvas.height = H * DPR;
+canvas.style.width = W + 'px';
+canvas.style.height = H + 'px';
+ctx.scale(DPR, DPR);
 
-let pipes = [];
+let state = 'menu';
 let frame = 0;
 let score = 0;
-let highScore = localStorage.getItem("flappyHigh") || 0;
-let gameOver = false;
 
-function drawBird() {
-  ctx.beginPath();
-  ctx.arc(bird.x, bird.y, bird.radius, 0, Math.PI * 2);
-  ctx.fillStyle = "yellow";
-  ctx.fill();
-  ctx.closePath();
+// Ambil skor tertinggi dari localStorage
+let highScore = parseInt(localStorage.getItem('flappyHighScore')) || 0;
+highScoreEl.textContent = 'Skor Tertinggi: ' + highScore;
+
+// Burung (lebih mudah dikontrol)
+const bird = {
+  x: W * 0.25,
+  y: H * 0.45,
+  radius: 14,
+  vel: 0,
+  gravity: 0.4,
+  flapPower: -8.5,
+  maxFallSpeed: 10,
+  rotation: 0
+};
+
+// Pipa
+const pipes = [];
+const PIPE_WIDTH = 60;
+const GAP = 160;
+let pipeSpawnTimer = 0;
+const PIPE_SPAWN_INTERVAL = 100;
+
+// Tanah
+const ground = { y: H - 80, height: 80 };
+
+function rand(min, max){ return Math.random()*(max-min)+min; }
+function rectsOverlap(ax,ay,aw,ah, bx,by,bw,bh){
+  return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
 
-function drawPipes() {
-  for (let pipe of pipes) {
-    ctx.fillStyle = "green";
-    ctx.fillRect(pipe.x, 0, pipe.width, pipe.top);
-    ctx.fillRect(pipe.x, pipe.bottom, pipe.width, canvas.height - pipe.bottom);
+// Input
+function flap(){
+  if(state === 'menu'){
+    state = 'playing';
+    score = 0;
+    pipes.length = 0;
+    bird.y = H*0.45;
+    bird.vel = 0;
+    scoreEl.textContent = 'Skor: 0';
+  }
+  if(state === 'dead'){
+    state = 'menu';
+  } else {
+    bird.vel = bird.flapPower;
   }
 }
+window.addEventListener('keydown', e => { if(e.code === 'Space') { e.preventDefault(); flap(); }});
+window.addEventListener('mousedown', flap);
+window.addEventListener('touchstart', e => { e.preventDefault(); flap(); }, {passive:false});
 
-function update() {
-  if (gameOver) return;
-
+function update(){
   frame++;
-  bird.velocity += bird.gravity;
-  bird.y += bird.velocity;
 
-  // Tambah pipa baru tiap 120 frame
-  if (frame % 120 === 0) {
-    let gap = 120;
-    let top = Math.random() * (canvas.height / 2);
-    pipes.push({
-      x: canvas.width,
-      width: 50,
-      top: top,
-      bottom: top + gap,
-    });
-  }
+  if(state === 'playing'){
+    bird.vel += bird.gravity;
+    if(bird.vel > bird.maxFallSpeed) bird.vel = bird.maxFallSpeed;
+    bird.y += bird.vel;
+    bird.rotation = Math.max(Math.min((bird.vel / 12) * 45, 45), -45);
 
-  // Gerak dan hapus pipa
-  for (let i = pipes.length - 1; i >= 0; i--) {
-    pipes[i].x -= 2; // Kecepatan lebih lambat
-    if (pipes[i].x + pipes[i].width < 0) {
-      pipes.splice(i, 1);
-      score += 10;
-      if (score > highScore) {
-        highScore = score;
-        localStorage.setItem("flappyHigh", highScore);
+    // Spawn pipa
+    pipeSpawnTimer++;
+    if(pipeSpawnTimer >= PIPE_SPAWN_INTERVAL){
+      pipeSpawnTimer = 0;
+      const topH = rand(60, ground.y - GAP - 60);
+      pipes.push({
+        x: W + 20,
+        top: 0,
+        topH: topH,
+        bottom: topH + GAP,
+        width: PIPE_WIDTH,
+        passed: false
+      });
+    }
+
+    // Gerak & cek tabrakan
+    for(let i = pipes.length-1; i>=0; i--){
+      const p = pipes[i];
+      p.x -= 2.5;
+
+      if(p.x + p.width < -50) pipes.splice(i,1);
+
+      if(!p.passed && p.x + p.width < bird.x - bird.radius){
+        p.passed = true;
+        score += 10;
+        scoreEl.textContent = 'Skor: ' + score;
+      }
+
+      if(rectsOverlap(bird.x - bird.radius, bird.y - bird.radius, bird.radius*2, bird.radius*2,
+                      p.x, p.top, p.width, p.topH)){
+        gameOver();
+      }
+
+      const bottomH = ground.y - p.bottom;
+      if(rectsOverlap(bird.x - bird.radius, bird.y - bird.radius, bird.radius*2, bird.radius*2,
+                      p.x, p.bottom, p.width, bottomH)){
+        gameOver();
       }
     }
-  }
 
-  // Tabrakan
-  for (let pipe of pipes) {
-    if (
-      bird.x + bird.radius > pipe.x &&
-      bird.x - bird.radius < pipe.x + pipe.width &&
-      (bird.y - bird.radius < pipe.top || bird.y + bird.radius > pipe.bottom)
-    ) {
-      endGame();
+    // Tanah / langit
+    if(bird.y + bird.radius > ground.y){
+      bird.y = ground.y - bird.radius;
+      gameOver();
+    }
+    if(bird.y - bird.radius < 0){
+      bird.y = bird.radius;
+      bird.vel = 0;
     }
   }
 
-  // Jatuh ke tanah
-  if (bird.y + bird.radius > canvas.height) {
-    endGame();
+  if(state === 'dead'){
+    bird.vel += bird.gravity;
+    if(bird.vel > bird.maxFallSpeed) bird.vel = bird.maxFallSpeed;
+    bird.y += bird.vel;
+    bird.rotation = Math.min(90, bird.rotation + 3);
+  }
+}
+
+function gameOver(){
+  state = 'dead';
+  // Simpan skor tertinggi
+  if(score > highScore){
+    highScore = score;
+    localStorage.setItem('flappyHighScore', highScore);
+    highScoreEl.textContent = 'Skor Tertinggi: ' + highScore;
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+
+  // Pipa
+  for(const p of pipes){
+    ctx.fillStyle = '#2e8b57';
+    ctx.fillRect(p.x, p.top, p.width, p.topH);
+    ctx.fillRect(p.x, p.bottom, p.width, ground.y - p.bottom);
+    ctx.fillStyle = '#2a7a4b';
+    ctx.fillRect(p.x, p.topH - 12, p.width, 12);
+    ctx.fillRect(p.x, p.bottom, p.width, 12);
   }
 
+  // Tanah
+  ctx.fillStyle = '#de9b48';
+  ctx.fillRect(0, ground.y, W, ground.height);
+
+  // Burung
+  ctx.save();
+  ctx.translate(bird.x, bird.y);
+  ctx.rotate(bird.rotation * Math.PI/180);
+  ctx.beginPath();
+  ctx.fillStyle = '#ffcc00';
+  ctx.arc(0, 0, bird.radius, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.fillStyle = '#e6b200';
+  ctx.ellipse(-3, 6, 10, 5, Math.sin(frame*0.2)*0.3, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.fillStyle = '#fff';
+  ctx.arc(5, -4, 5, 0, Math.PI*2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.fillStyle = '#000';
+  ctx.arc(6, -4, 2, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+
+  // UI
+  if(state === 'menu'){
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.font = '22px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('Klik / Ketuk / Spasi untuk mulai', W/2, H*0.2);
+    ctx.restore();
+  }
+  if(state === 'dead'){
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.font = '28px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillText('Game Over', W/2, H*0.3);
+    ctx.font = '18px system-ui';
+    ctx.fillText('Klik / Ketuk untuk ulang', W/2, H*0.36);
+    ctx.restore();
+  }
+}
+
+function loop(){
+  update();
   draw();
+  requestAnimationFrame(loop);
 }
 
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  drawPipes();
-  drawBird();
-  document.getElementById("score").innerHTML = `Skor: ${score} | Tertinggi: ${highScore}`;
-}
-
-function endGame() {
-  gameOver = true;
-  ctx.fillStyle = "rgba(0,0,0,0.5)";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = "white";
-  ctx.font = "28px sans-serif";
-  ctx.fillText("GAME OVER", 120, 280);
-  ctx.fillText("Tap untuk main lagi", 90, 320);
-}
-
-function resetGame() {
-  bird.y = 150;
-  bird.velocity = 0;
-  pipes = [];
-  frame = 0;
-  score = 0;
-  gameOver = false;
-}
-
-function flap() {
-  if (gameOver) {
-    resetGame();
-    return;
-  }
-  bird.velocity = bird.lift;
-}
-
-canvas.addEventListener("touchstart", flap);
-canvas.addEventListener("mousedown", flap);
-
-setInterval(update, 20); // 50 fps
+loop();
 </script>
 </body>
 </html>
